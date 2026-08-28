@@ -100,6 +100,29 @@ void VRController::setWeight(
   w_damping_ = w_damping;
 }
 
+void VRController::setJointPostureTask(
+  const Eigen::VectorXd & w_posture, const Eigen::VectorXd & qdot_posture_desired)
+{
+  if (w_posture.size() != joint_dof_ || qdot_posture_desired.size() != joint_dof_) {
+    w_posture_.resize(0);
+    qdot_posture_desired_.resize(0);
+    return;
+  }
+  w_posture_ = w_posture;
+  qdot_posture_desired_ = qdot_posture_desired;
+}
+
+void VRController::setAccelerationTask(const double w_accel, const Eigen::VectorXd & qdot_prev)
+{
+  if (w_accel <= 0.0 || qdot_prev.size() != joint_dof_) {
+    w_accel_ = 0.0;
+    qdot_prev_.resize(0);
+    return;
+  }
+  w_accel_ = w_accel;
+  qdot_prev_ = qdot_prev;
+}
+
 void VRController::setControllerParams(
   const double slack_penalty, const double cbf_alpha,
   const double buffer_distance, const double safe_distance)
@@ -135,6 +158,27 @@ void VRController::setCost()
   P_ds_.block(
     si_index_.qdot_start, si_index_.qdot_start, si_index_.qdot_size,
     si_index_.qdot_size) += 2.0 * w_damping_.asDiagonal();
+
+  // Joint-space posture task: sum_j w_j (qdot_j - qdot_des_j)^2
+  if (w_posture_.size() == si_index_.qdot_size &&
+    qdot_posture_desired_.size() == si_index_.qdot_size)
+  {
+    P_ds_.block(
+      si_index_.qdot_start, si_index_.qdot_start, si_index_.qdot_size,
+      si_index_.qdot_size) += 2.0 * w_posture_.asDiagonal();
+    q_ds_.segment(si_index_.qdot_start, si_index_.qdot_size) +=
+      -2.0 * (w_posture_.asDiagonal() * qdot_posture_desired_);
+  }
+
+  // Soft acceleration limit: w_accel * ||qdot - qdot_prev||^2 (reduces jerk).
+  if (w_accel_ > 0.0 && qdot_prev_.size() == si_index_.qdot_size) {
+    P_ds_.block(
+      si_index_.qdot_start, si_index_.qdot_start, si_index_.qdot_size,
+      si_index_.qdot_size) += 2.0 * w_accel_ *
+      Eigen::MatrixXd::Identity(si_index_.qdot_size, si_index_.qdot_size);
+    q_ds_.segment(si_index_.qdot_start, si_index_.qdot_size) +=
+      -2.0 * w_accel_ * qdot_prev_;
+  }
 
   q_ds_.segment(si_index_.slack_q_min_start, si_index_.slack_q_min_size) =
     Eigen::VectorXd::Constant(si_index_.slack_q_min_size, slack_penalty_);

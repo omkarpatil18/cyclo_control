@@ -72,6 +72,14 @@ private:
   std::string model_lift_joint_name_;
   double lift_joint_offset_;
   double command_timeout_;
+  double motion_scale_ = 1.0;
+  std::string r_pivot_name_;
+  std::string l_pivot_name_;
+  bool remap_to_follower_shoulder_ = false;
+  bool pivot_links_valid_ = true;
+  std::vector<double> r_target_pivot_xyz_;   // follower shoulder (base_link, lift=0)
+  std::vector<double> l_target_pivot_xyz_;
+  double follower_lift_position_ = 0.0;
 
         // Subscribers
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr r_traj_sub_;
@@ -116,5 +124,10 @@ private:
   void updateLiftJointFromJointState(const sensor_msgs::msg::JointState & msg);
   geometry_msgs::msg::PoseStamped makePoseStamped(const Eigen::Affine3d & pose) const;
   Eigen::Affine3d computePoseInBaseFrame(const Eigen::Affine3d & link_pose) const;
+  Eigen::Vector3d targetPivot(
+    const std::vector<double> & target_pivot_xyz, const Eigen::Affine3d & leader_pivot) const;
+  Eigen::Affine3d mapToFollower(
+    const Eigen::Affine3d & pose, const Eigen::Affine3d & leader_pivot,
+    const Eigen::Vector3d & target_pivot) const;
 };
 }  // namespace cyclo_motion_controller_ros

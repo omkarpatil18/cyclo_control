@@ -159,6 +159,22 @@ vr_controller:
     startup_ref_pos_threshold: 0.3
     startup_ref_ori_threshold_deg: 120.0
 
+    # gripper pass-through from the raw leader stream (leader mode)
+    publish_gripper: true
+    raw_traj_timeout: 0.5
+
+    # joint-space posture bias (weighted redundancy resolution). Disabled unless the three list
+    # parameters are given (do NOT write empty lists: rclcpp rejects untyped empty sequences).
+    # Example (tabletop pose, Shoulder Yaw = arm_*_joint3):
+    #   posture_joint_names: ["arm_l_joint3", "arm_r_joint3"]
+    #   posture_positions:   [-1.773, 1.975]
+    #   posture_weights:     [10.0, 10.0]
+    kp_posture: 5.0
+
+    # soft acceleration limit: penalize change in joint velocity between cycles (reduces jerk).
+    # 0 = off. Try 0.05-0.5; higher = smoother but more lag on fast reference changes.
+    weight_accel: 0.0
+
 leader_controller:
   ros__parameters:
     control_frequency: 100.0
@@ -180,6 +196,16 @@ leader_controller:
     l_elbow_name: "arm_l_link4"
     lift_joint_name: "lift_joint"
     model_lift_joint_name: "joint"
+
+    # motion amplification: robot hand displacement = motion_scale x operator hand displacement,
+    # measured from the shoulder (pivot link). 1.0 = original 1:1 behaviour.
+    motion_scale: 1.0
+    r_motion_scale_pivot_link: "arm_r_link2"
+    l_motion_scale_pivot_link: "arm_l_link2"
+    # re-anchor goals on the FOLLOWER shoulders instead of the leader's (removes the 4.25 cm
+    # lateral shoulder offset between the two bodies). Shoulder coordinates default in code to
+    # the FFW SG2 values; override with r_target_pivot_xyz / l_target_pivot_xyz ([x, y, z], m).
+    remap_to_follower_shoulder: false
 
 reference_checker:
   ros__parameters:

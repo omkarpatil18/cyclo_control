@@ -58,6 +58,34 @@ LeaderController::LeaderController()
   l_elbow_name_ = this->declare_parameter("l_elbow_name", std::string("arm_l_link4"));
   lift_joint_name_ = this->declare_parameter("lift_joint_name", std::string("lift_joint"));
   model_lift_joint_name_ = this->declare_parameter("model_lift_joint_name", std::string("joint"));
+  // Motion amplification: the hand goal is scaled about a pivot link (default: the shoulder),
+  //   p_goal = p_pivot + motion_scale * (p_hand - p_pivot).   Orientation is passed through.
+  // motion_scale = 1.0 reproduces the original 1:1 behaviour.
+  motion_scale_ = this->declare_parameter("motion_scale", 1.0);
+  r_pivot_name_ = this->declare_parameter("r_motion_scale_pivot_link", std::string("arm_r_link2"));
+  l_pivot_name_ = this->declare_parameter("l_motion_scale_pivot_link", std::string("arm_l_link2"));
+  if (motion_scale_ <= 0.0) {
+    RCLCPP_WARN(this->get_logger(), "motion_scale=%.3f is invalid; using 1.0", motion_scale_);
+    motion_scale_ = 1.0;
+  }
+  // Frame re-anchoring: the leader and the follower are different bodies (leader shoulders sit
+  // 4.25 cm farther from the midline). When enabled, goals are expressed relative to the leader
+  // shoulder and re-attached to the FOLLOWER shoulder position (base_link frame, lift = 0):
+  //   target = follower_shoulder + motion_scale * (hand - leader_shoulder)
+  // Defaults are the FFW SG2 follower shoulders (arm_*_link2 origins from ffw_sg2_follower.urdf).
+  // The z of the follower shoulder follows the follower lift joint read from /joint_states.
+  remap_to_follower_shoulder_ = this->declare_parameter("remap_to_follower_shoulder", false);
+  r_target_pivot_xyz_ = this->declare_parameter(
+    "r_target_pivot_xyz", std::vector<double>{-0.0199, -0.2275, 1.4316});
+  l_target_pivot_xyz_ = this->declare_parameter(
+    "l_target_pivot_xyz", std::vector<double>{-0.0199, 0.2275, 1.4316});
+  for (const auto * v : {&r_target_pivot_xyz_, &l_target_pivot_xyz_}) {
+    if (v->size() != 3) {
+      RCLCPP_ERROR(this->get_logger(),
+        "*_target_pivot_xyz must have 3 elements (got %zu); re-anchoring disabled.", v->size());
+      remap_to_follower_shoulder_ = false;
+    }
+  }
 
   r_traj_sub_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
             right_traj_topic_, 10,
@@ -130,6 +158,31 @@ LeaderController::LeaderController()
     return;
   }
 
+  // The pivot links are needed whenever scaling or re-anchoring is active; validate them once
+  // here (a typo must not throw inside the control loop).
+  pivot_links_valid_ = true;
+  for (const auto & pivot : {r_pivot_name_, l_pivot_name_}) {
+    if (!kinematics_solver_->hasLinkFrame(pivot)) {
+      RCLCPP_ERROR(this->get_logger(),
+        "pivot link '%s' not found in the leader URDF; motion scaling and shoulder re-anchoring "
+        "are disabled (goals pass through 1:1).", pivot.c_str());
+      pivot_links_valid_ = false;
+    }
+  }
+  if (!pivot_links_valid_) {
+    motion_scale_ = 1.0;
+    remap_to_follower_shoulder_ = false;
+  }
+  RCLCPP_INFO(this->get_logger(), "  - motion_scale: %.3f (pivots: %s / %s)",
+    motion_scale_, r_pivot_name_.c_str(), l_pivot_name_.c_str());
+  if (remap_to_follower_shoulder_) {
+    RCLCPP_INFO(this->get_logger(),
+      "  - goals re-anchored on follower shoulders R(%.4f, %.4f, %.4f) L(%.4f, %.4f, %.4f) + lift",
+      r_target_pivot_xyz_[0], r_target_pivot_xyz_[1], r_target_pivot_xyz_[2],
+      l_target_pivot_xyz_[0], l_target_pivot_xyz_[1], l_target_pivot_xyz_[2]);
+  } else {
+    RCLCPP_INFO(this->get_logger(), "  - goals stay in the leader frame (no re-anchoring)");
+  }
   RCLCPP_INFO(this->get_logger(),
             "Leader Controller initialized successfully!");
   RCLCPP_INFO(this->get_logger(),
@@ -229,6 +282,7 @@ void LeaderController::updateLiftJointFromJointState(const sensor_msgs::msg::Joi
     }
     if (i < msg.position.size()) {
       q_[lift_joint_index_] = msg.position[i];
+      follower_lift_position_ = msg.position[i];
       lift_joint_received_ = true;
     }
     if (i < msg.velocity.size()) {
@@ -308,20 +362,37 @@ void LeaderController::controlLoopCallback()
   try {
     kinematics_solver_->updateState(q_, qdot_);
 
+    const bool mapping_active =
+      pivot_links_valid_ && (motion_scale_ != 1.0 || remap_to_follower_shoulder_);
+
     if (right_recent) {
-      const Eigen::Affine3d r_pose =
+      Eigen::Affine3d r_pose =
         computePoseInBaseFrame(kinematics_solver_->getPose(r_gripper_name_));
-      const Eigen::Affine3d r_elbow_pose =
+      Eigen::Affine3d r_elbow_pose =
         computePoseInBaseFrame(kinematics_solver_->getPose(r_elbow_name_));
+      if (mapping_active) {
+        const Eigen::Affine3d r_pivot =
+          computePoseInBaseFrame(kinematics_solver_->getPose(r_pivot_name_));
+        const Eigen::Vector3d r_out = targetPivot(r_target_pivot_xyz_, r_pivot);
+        r_pose = mapToFollower(r_pose, r_pivot, r_out);
+        r_elbow_pose = mapToFollower(r_elbow_pose, r_pivot, r_out);
+      }
       r_goal_pose_pub_->publish(makePoseStamped(r_pose));
       r_elbow_pose_pub_->publish(makePoseStamped(r_elbow_pose));
     }
 
     if (left_recent) {
-      const Eigen::Affine3d l_pose =
+      Eigen::Affine3d l_pose =
         computePoseInBaseFrame(kinematics_solver_->getPose(l_gripper_name_));
-      const Eigen::Affine3d l_elbow_pose =
+      Eigen::Affine3d l_elbow_pose =
         computePoseInBaseFrame(kinematics_solver_->getPose(l_elbow_name_));
+      if (mapping_active) {
+        const Eigen::Affine3d l_pivot =
+          computePoseInBaseFrame(kinematics_solver_->getPose(l_pivot_name_));
+        const Eigen::Vector3d l_out = targetPivot(l_target_pivot_xyz_, l_pivot);
+        l_pose = mapToFollower(l_pose, l_pivot, l_out);
+        l_elbow_pose = mapToFollower(l_elbow_pose, l_pivot, l_out);
+      }
       l_goal_pose_pub_->publish(makePoseStamped(l_pose));
       l_elbow_pose_pub_->publish(makePoseStamped(l_elbow_pose));
     }
@@ -346,6 +417,29 @@ geometry_msgs::msg::PoseStamped LeaderController::makePoseStamped(
   msg.pose.orientation.y = quat.y();
   msg.pose.orientation.z = quat.z();
   return msg;
+}
+
+Eigen::Vector3d LeaderController::targetPivot(
+  const std::vector<double> & target_pivot_xyz, const Eigen::Affine3d & leader_pivot) const
+{
+  if (!remap_to_follower_shoulder_ || target_pivot_xyz.size() != 3) {
+    return leader_pivot.translation();      // re-anchoring disabled: pivot stays on the leader
+  }
+  Eigen::Vector3d out(target_pivot_xyz[0], target_pivot_xyz[1], target_pivot_xyz[2]);
+  out.z() += follower_lift_position_;       // follower shoulder rides on the lift
+  return out;
+}
+
+Eigen::Affine3d LeaderController::mapToFollower(
+  const Eigen::Affine3d & pose, const Eigen::Affine3d & leader_pivot,
+  const Eigen::Vector3d & target_pivot) const
+{
+  // target = target_pivot + motion_scale * (pose - leader_pivot); orientation unchanged.
+  // With target_pivot == leader_pivot and motion_scale == 1 this is the identity.
+  Eigen::Affine3d mapped = pose;
+  mapped.translation() =
+    target_pivot + motion_scale_ * (pose.translation() - leader_pivot.translation());
+  return mapped;
 }
 
 Eigen::Affine3d LeaderController::computePoseInBaseFrame(

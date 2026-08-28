@@ -50,6 +50,16 @@ VRController::VRController()
   weight_orientation_ = this->declare_parameter("weight_orientation", 1.0);
   weight_elbow_position_ = this->declare_parameter("weight_elbow_position", 0.5);
   weight_damping_ = this->declare_parameter("weight_damping", 0.1);
+  // Joint-space posture bias: pull the listed joints toward posture_positions with a weighted
+  // velocity task (qdot_des = kp_posture * (q_ref - q)). Empty list => disabled.
+  posture_joint_names_ = this->declare_parameter(
+    "posture_joint_names", std::vector<std::string>{});
+  posture_positions_ = this->declare_parameter("posture_positions", std::vector<double>{});
+  posture_weights_ = this->declare_parameter("posture_weights", std::vector<double>{});
+  kp_posture_ = this->declare_parameter("kp_posture", 5.0);
+  // Soft acceleration limit: penalize change in commanded joint velocity between cycles
+  // (reduces jerk). 0 disables it.
+  weight_accel_ = this->declare_parameter("weight_accel", 0.0);
   slack_penalty_ = this->declare_parameter("slack_penalty", 1000.0);
   cbf_alpha_ = this->declare_parameter("cbf_alpha", 5.0);
   collision_buffer_ = this->declare_parameter("collision_buffer", 0.05);
@@ -76,6 +86,7 @@ VRController::VRController()
             "left_raw_traj_topic",
             std::string("/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"));
   raw_traj_timeout_ = this->declare_parameter("raw_traj_timeout", 0.5);
+  publish_gripper_ = this->declare_parameter("publish_gripper", true);
   lift_topic_ = this->declare_parameter("lift_topic",
       std::string("/leader/joystick_controller_right/joint_trajectory"));
   lift_vel_bound_ = this->declare_parameter("lift_vel_bound", 0.0);
@@ -243,6 +254,37 @@ void VRController::initializeJointConfig()
   model_joint_index_map_.clear();
   for (size_t i = 0; i < model_joint_names_.size(); ++i) {
     model_joint_index_map_[model_joint_names_[i]] = static_cast<int>(i);
+  }
+
+  // Resolve joint-space posture task (validated once; invalid config disables it).
+  posture_indices_.clear();
+  if (!posture_joint_names_.empty()) {
+    const bool sizes_ok = posture_positions_.size() == posture_joint_names_.size() &&
+      posture_weights_.size() == posture_joint_names_.size();
+    if (!sizes_ok) {
+      RCLCPP_ERROR(this->get_logger(),
+        "posture_joint_names/posture_positions/posture_weights sizes differ (%zu/%zu/%zu); "
+        "posture task disabled.",
+        posture_joint_names_.size(), posture_positions_.size(), posture_weights_.size());
+      posture_joint_names_.clear();
+    } else {
+      for (size_t k = 0; k < posture_joint_names_.size(); ++k) {
+        auto it = model_joint_index_map_.find(posture_joint_names_[k]);
+        if (it == model_joint_index_map_.end()) {
+          RCLCPP_ERROR(this->get_logger(),
+            "posture joint '%s' not in the follower model; posture task disabled.",
+            posture_joint_names_[k].c_str());
+          posture_indices_.clear();
+          posture_joint_names_.clear();
+          break;
+        }
+        posture_indices_.push_back(it->second);
+      }
+    }
+  }
+  for (size_t k = 0; k < posture_indices_.size(); ++k) {
+    RCLCPP_INFO(this->get_logger(), "Posture bias: %s -> %.3f rad (weight %.2f, kp %.2f)",
+      posture_joint_names_[k].c_str(), posture_positions_[k], posture_weights_[k], kp_posture_);
   }
 
   left_arm_joints_.clear();
@@ -719,6 +761,26 @@ void VRController::controlLoopCallback()
     qp_controller_->setWeight(weights, damping);
     qp_controller_->setDesiredTaskVel(desired_task_velocities);
 
+    // Joint-space posture bias (weighted redundancy resolution); ramps with slow-start.
+    if (!posture_indices_.empty()) {
+      const int dof = kinematics_solver_->getDof();
+      Eigen::VectorXd w_posture = Eigen::VectorXd::Zero(dof);
+      Eigen::VectorXd qdot_posture = Eigen::VectorXd::Zero(dof);
+      for (size_t k = 0; k < posture_indices_.size(); ++k) {
+        const int idx = posture_indices_[k];
+        w_posture[idx] = posture_weights_[k];
+        qdot_posture[idx] =
+          kp_posture_ * (posture_positions_[k] - q_feedback[idx]) * slow_start_scale;
+      }
+      qp_controller_->setJointPostureTask(w_posture, qdot_posture);
+    } else {
+      qp_controller_->setJointPostureTask(Eigen::VectorXd(), Eigen::VectorXd());
+    }
+
+    // Soft acceleration limit (reduces jerk); qdot_prev_ is empty on the first active cycle
+    // and after any re-sync, so the term is inactive until a velocity has actually been applied.
+    qp_controller_->setAccelerationTask(weight_accel_, qdot_prev_);
+
             // Solve QP to get optimal joint velocities
     Eigen::VectorXd optimal_velocities;
     if (!qp_controller_->getOptJointVel(optimal_velocities)) {
@@ -730,6 +792,7 @@ void VRController::controlLoopCallback()
             // Compute command from current state
             // q_desired_ = q_ + optimal_velocities * dt_;
     q_desired_ = q_feedback + optimal_velocities * dt_;
+    qdot_prev_ = optimal_velocities;
 
     // Publish trajectory commands
     publishTrajectory(q_desired_);
@@ -746,6 +809,7 @@ bool VRController::jointStateTimedOut() const
 
 void VRController::syncCommandStateToFeedback()
 {
+  qdot_prev_.resize(0);   // controller not actively driving -> no previous velocity to smooth from
   if (q_.size() != q_desired_.size()) {
     return;
   }
@@ -810,17 +874,23 @@ void VRController::publishTrajectory(const Eigen::VectorXd & q_desired)
       }
     }
 
-            // Publish left arm trajectory without gripper joint
+            // Publish left arm trajectory (+ gripper pass-through from the raw leader stream)
     if (!left_arm_indices.empty()) {
       auto traj_left = createArmTrajectoryMsg(
                     left_arm_joints_, q_desired, left_arm_indices);
+      appendGripperIfFresh(
+        traj_left, left_gripper_joint_name_, left_raw_gripper_received_,
+        left_raw_gripper_position_, last_left_raw_traj_time_);
       arm_l_pub_->publish(traj_left);
     }
 
-            // Publish right arm trajectory without gripper joint
+            // Publish right arm trajectory (+ gripper pass-through from the raw leader stream)
     if (!right_arm_indices.empty()) {
       auto traj_right = createArmTrajectoryMsg(
                     right_arm_joints_, q_desired, right_arm_indices);
+      appendGripperIfFresh(
+        traj_right, right_gripper_joint_name_, right_raw_gripper_received_,
+        right_raw_gripper_position_, last_right_raw_traj_time_);
       arm_r_pub_->publish(traj_right);
     }
 
@@ -838,6 +908,27 @@ void VRController::publishTrajectory(const Eigen::VectorXd & q_desired)
   } catch (const std::exception & e) {
     RCLCPP_ERROR(this->get_logger(), "Error publishing trajectory: %s", e.what());
   }
+}
+
+void VRController::appendGripperIfFresh(
+  trajectory_msgs::msg::JointTrajectory & traj,
+  const std::string & gripper_joint_name,
+  const bool received,
+  const double position,
+  const rclcpp::Time & last_time) const
+{
+  // The gripper is not part of the QP (it is a fixed joint in the follower model), so it is
+  // forwarded 1:1 from the raw leader stream, exactly like the movej node does. Only forward a
+  // value that is still fresh: once the leader stops streaming (triggers released), the follower
+  // controller simply holds the last commanded gripper position.
+  if (!publish_gripper_ || !received || gripper_joint_name.empty() || traj.points.empty()) {
+    return;
+  }
+  if ((this->now() - last_time).seconds() > raw_traj_timeout_) {
+    return;
+  }
+  traj.joint_names.push_back(gripper_joint_name);
+  traj.points.front().positions.push_back(position);
 }
 
 trajectory_msgs::msg::JointTrajectory VRController::createArmTrajectoryMsg(

@@ -52,6 +52,19 @@ public:
   void setControllerParams(
     const double slack_penalty, const double cbf_alpha,
     const double buffer_distance, const double safe_distance);
+  /**
+   * @brief Joint-space posture task (weighted redundancy resolution).
+   * Adds sum_j w_j * (qdot_j - qdot_des_j)^2 to the cost. Joints with w_j = 0 are unaffected.
+   * Both vectors must have size joint_dof_ (pinocchio joint order); otherwise the task is ignored.
+   */
+  void setJointPostureTask(
+    const Eigen::VectorXd & w_posture, const Eigen::VectorXd & qdot_posture_desired);
+  /**
+   * @brief Soft acceleration limit: adds w_accel * ||qdot - qdot_prev||^2 to the cost, penalizing
+   * change in joint velocity between cycles (=> bounded acceleration, reduced jerk). w_accel <= 0
+   * or a wrong-size qdot_prev disables it.
+   */
+  void setAccelerationTask(const double w_accel, const Eigen::VectorXd & qdot_prev);
   bool getOptJointVel(Eigen::VectorXd & opt_qdot);
 
 private:
@@ -87,6 +100,10 @@ private:
   std::map<std::string, cyclo_motion_controller::common::Vector6d> link_xdot_desired_;
   std::map<std::string, cyclo_motion_controller::common::Vector6d> link_w_tracking_;
   Eigen::VectorXd w_damping_;
+  Eigen::VectorXd w_posture_;              // empty => posture task disabled
+  Eigen::VectorXd qdot_posture_desired_;
+  double w_accel_ = 0.0;                    // <= 0 => acceleration task disabled
+  Eigen::VectorXd qdot_prev_;
   double slack_penalty_;
   double cbf_alpha_;
   double collision_buffer_;

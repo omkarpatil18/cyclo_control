@@ -63,6 +63,14 @@ private:
   double weight_orientation_;
   double weight_elbow_position_;
   double weight_damping_;
+  // Joint-space posture bias (see setJointPostureTask): per-joint targets + weights, config-driven.
+  std::vector<std::string> posture_joint_names_;
+  std::vector<double> posture_positions_;
+  std::vector<double> posture_weights_;
+  double kp_posture_;
+  std::vector<int> posture_indices_;       // resolved model indices (same order as the vectors)
+  double weight_accel_ = 0.0;              // soft acceleration limit weight (0 = off)
+  Eigen::VectorXd qdot_prev_;              // last cycle's optimal joint velocity
   double slack_penalty_;
   double cbf_alpha_;
   double collision_buffer_;
@@ -79,6 +87,7 @@ private:
   std::string right_raw_traj_topic_;
   std::string left_raw_traj_topic_;
   double raw_traj_timeout_;
+  bool publish_gripper_ = true;
   std::string lift_topic_;
   double lift_vel_bound_;
   std::string r_gripper_pose_topic_;
@@ -193,6 +202,12 @@ private:
         // Helper functions
   void initializeJointConfig();
   void publishTrajectory(const Eigen::VectorXd & q_desired);
+  void appendGripperIfFresh(
+    trajectory_msgs::msg::JointTrajectory & traj,
+    const std::string & gripper_joint_name,
+    const bool received,
+    const double position,
+    const rclcpp::Time & last_time) const;
   trajectory_msgs::msg::JointTrajectory createArmTrajectoryMsg(
     const std::vector<std::string> & arm_joint_names,
     const Eigen::VectorXd & positions,
