@@ -1,0 +1,210 @@
+ai_worker_movel_controller:
+  ros__parameters:
+    control_frequency: 100.0
+    time_step: 0.01
+    trajectory_time: 0.0
+
+    kp_position: 50.0
+    kp_orientation: 50.0
+    weight_position: 10.0
+    weight_orientation: 1.0
+    weight_damping: 0.1
+
+    collision_buffer: 0.05
+    collision_safe_distance: 0.02
+    slack_penalty: 1000.0
+    cbf_alpha: 50.0
+
+    joint_states_topic: "/joint_states"
+    right_movel_topic: "/r_goal_move"
+    left_movel_topic: "/l_goal_move"
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
+    lift_topic: "/leader/joystick_controller_right/joint_trajectory"
+
+    lift_vel_bound: 0.0
+
+    r_gripper_pose_topic: "/r_gripper_pose"
+    l_gripper_pose_topic: "/l_gripper_pose"
+    r_gripper_name: "end_effector_r_link"
+    l_gripper_name: "end_effector_l_link"
+    right_gripper_joint: "gripper_r_joint1"
+    left_gripper_joint: "gripper_l_joint1"
+    controller_error_topic: "~/controller_error"
+
+ai_worker_movej_controller:
+  ros__parameters:
+    control_frequency: 100.0
+    time_step: 0.01
+    trajectory_time: 0.0
+
+    kp_joint: 50.0
+    weight_tracking: 10.0
+    weight_damping: 0.1
+
+    collision_buffer: 0.05
+    collision_safe_distance: 0.02
+    slack_penalty: 1000.0
+    cbf_alpha: 50.0
+
+    command_timeout: 0.1
+
+    joint_states_topic: "/joint_states"
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/raw_joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"
+    right_traj_filtered_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
+    left_traj_filtered_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
+
+ai_worker_bimanual_movel_controller:
+  ros__parameters:
+    control_frequency: 100.0
+    time_step: 0.01
+    trajectory_time: 0.0
+
+    kp_position: 50.0
+    kp_orientation: 50.0
+    weight_position: 10.0
+    weight_orientation: 1.0
+    weight_damping: 0.1
+
+    collision_buffer: 0.05
+    collision_safe_distance: 0.02
+    slack_penalty: 1000.0
+    cbf_alpha: 50.0
+    joint_state_timeout: 0.5
+
+    joint_states_topic: "/joint_states"
+    right_movel_topic: "/r_goal_move"
+    left_movel_topic: "/l_goal_move"
+    virtual_object_movel_topic: "/virtual_object_goal_move"
+    grasp_capture_topic: "/capture_grasp"
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
+    lift_topic: "/leader/joystick_controller_right/joint_trajectory"
+    lift_vel_bound: 0.0
+    r_gripper_pose_topic: "/r_gripper_pose"
+    l_gripper_pose_topic: "/l_gripper_pose"
+    r_gripper_name: "end_effector_r_link"
+    l_gripper_name: "end_effector_l_link"
+
+ai_worker_bimanual_movej_controller:
+  ros__parameters:
+    control_frequency: 100.0
+    time_step: 0.01
+    trajectory_time: 0.0
+
+    kp_joint: 50.0
+    weight_tracking: 10.0
+    weight_damping: 0.1
+
+    collision_buffer: 0.05
+    collision_safe_distance: 0.02
+    slack_penalty: 1000.0
+    cbf_alpha: 50.0
+    joint_state_timeout: 0.5
+
+    joint_states_topic: "/joint_states"
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/raw_joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"
+    grasp_capture_topic: "/capture_grasp"
+    right_traj_filtered_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
+    left_traj_filtered_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
+    right_gripper_joint: "gripper_r_joint1"
+    left_gripper_joint: "gripper_l_joint1"
+    r_gripper_name: "arm_r_link7"
+    l_gripper_name: "arm_l_link7"
+    gripper_grasp_threshold: 0.85
+    gripper_grasp_hold_time: 2.0
+
+vr_controller:
+  ros__parameters:
+    control_frequency: 100.0
+    time_step: 0.01
+    trajectory_time: 0.0
+
+    kp_position: 50.0
+    kp_orientation: 50.0
+
+    weight_position: 10.0
+    weight_orientation: 1.0
+    weight_elbow_position: 0.0
+    weight_damping: 0.1
+
+    collision_buffer: 0.05
+    collision_safe_distance: 0.02
+    slack_penalty: 1000.0
+    cbf_alpha: 50.0
+    
+    reactivate_topic: "/reactivate"
+    joint_states_topic: "/joint_states"
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/joint_trajectory"
+    lift_topic: "/leader/joystick_controller_right/joint_trajectory"
+
+    lift_vel_bound: 0.0
+
+    r_goal_pose_topic: "/r_goal_pose"
+    l_goal_pose_topic: "/l_goal_pose"
+    r_elbow_pose_topic: "/r_subgoal_pose"
+    l_elbow_pose_topic: "/l_subgoal_pose"
+    r_gripper_pose_topic: "/r_gripper_pose"
+    l_gripper_pose_topic: "/l_gripper_pose"
+    r_gripper_name: "arm_r_link7"
+    l_gripper_name: "arm_l_link7"
+    r_elbow_name: "arm_r_link4"
+    l_elbow_name: "arm_l_link4"
+    right_gripper_joint: "gripper_r_joint1"
+    left_gripper_joint: "gripper_l_joint1"
+
+    startup_ref_pos_threshold: 0.3
+    startup_ref_ori_threshold_deg: 120.0
+
+    # gripper pass-through from the raw leader stream (leader mode)
+    publish_gripper: true
+    raw_traj_timeout: 0.5
+
+    # joint-space posture bias toward the tabletop pose: Shoulder Yaw (arm_*_joint3) only.
+    posture_joint_names: ["arm_l_joint3", "arm_r_joint3"]
+    posture_positions: [-2.3, 2.3]
+    posture_weights: [3.0, 3.0]
+    kp_posture: 5.0
+    weight_accel: 0.1   # soft acceleration limit (reduces jerk); tune 0.05-0.5
+
+leader_controller:
+  ros__parameters:
+    control_frequency: 100.0
+
+    joint_states_topic: "/joint_states" 
+    right_traj_topic: "/leader/joint_trajectory_command_broadcaster_right/raw_joint_trajectory"
+    left_traj_topic: "/leader/joint_trajectory_command_broadcaster_left/raw_joint_trajectory"
+    reactivate_topic: "/reactivate"
+
+    command_timeout: 0.1
+
+    r_goal_pose_topic: "/r_goal_pose"
+    l_goal_pose_topic: "/l_goal_pose"
+    r_elbow_pose_topic: "/r_elbow_pose"
+    l_elbow_pose_topic: "/l_elbow_pose"
+    r_gripper_name: "arm_r_link7"
+    l_gripper_name: "arm_l_link7"
+    r_elbow_name: "arm_r_link4"
+    l_elbow_name: "arm_l_link4"
+    lift_joint_name: "lift_joint"
+    model_lift_joint_name: "joint"
+
+    # motion amplification: robot hand displacement = motion_scale x operator hand displacement,
+    # measured from the shoulder (pivot link). 1.0 = original 1:1 behaviour.
+    motion_scale: 1.0
+    r_motion_scale_pivot_link: "arm_r_link2"
+    l_motion_scale_pivot_link: "arm_l_link2"
+    # re-anchor goals on the follower shoulders (removes the leader/follower shoulder offset);
+    # shoulder coordinates default to the SG2 values in code
+    remap_to_follower_shoulder: true
+
+reference_checker:
+  ros__parameters:
+    ref_pos_jump_threshold: 0.1
+    ref_ori_jump_threshold_deg: 30.0
+    
+    r_goal_pose_topic: "/r_goal_pose"
+    l_goal_pose_topic: "/l_goal_pose"
