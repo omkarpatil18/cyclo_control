@@ -464,6 +464,14 @@ void VRController::reactivateCallback(const std_msgs::msg::Bool::SharedPtr msg)
   }
 
   reactivate_state_ = msg->data;
+        // Drop buffered goal/elbow references on every arm/disarm transition:
+        // they go stale across a disarm -> external move (e.g. homing) -> re-arm
+        // cycle and must not drive the robot. The startup gate then waits until
+        // fresh goals arrive from the leader (i.e. the operator re-engages).
+  r_goal_pose_received_ = false;
+  l_goal_pose_received_ = false;
+  r_elbow_pose_received_ = false;
+  l_elbow_pose_received_ = false;
   if (reactivate_state_) {
     RCLCPP_WARN(this->get_logger(),
       "Reactivate topic '%s' set to true. "
